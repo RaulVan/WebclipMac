@@ -12,13 +12,15 @@ import Security
 
 
 struct ContentView: View {
+    // 添加coordinator用于页面导航
+    var coordinator: AppCoordinator
+    
     @State private var appName: String = ""
     @State private var url: String = ""
     @State private var selectedImage: NSImage?
     @State private var isRemovable: Bool = true
     @State private var isFullScreen: Bool = true
     @State private var showAdvancedSettings: Bool = false
-    @State private var showCertificateSettings: Bool = false
     
     // 表单验证状态
     @State private var nameError: String? = nil
@@ -30,10 +32,6 @@ struct ContentView: View {
     @State private var organizationName: String = ""
     @State private var profileDescription: String = ""
     @State private var consentText: String = ""
-    
-    // 证书签名
-    @State private var certificateFile: URL?
-    @State private var certificatePassword: String = ""
     
     var isFormValid: Bool {
         return appName.count > 0 && URL(string: url) != nil && selectedImage != nil && 
@@ -107,7 +105,7 @@ struct ContentView: View {
                                     .foregroundColor(.red)
                             }
                             
-                            ZStack {
+                            ZStack(alignment: .leading) {
                                 VStack(alignment: .leading) {
                                     HStack(alignment: .top) {
                                         if let image = selectedImage {
@@ -246,72 +244,6 @@ struct ContentView: View {
                     },
                     label: {
                         Text("高级设置 (可选)")
-                            .font(.headline)
-                    }
-                )
-                .padding(.vertical, 5)
-                .padding(.horizontal)
-                .background(Color(.windowBackgroundColor))
-                .cornerRadius(8)
-                
-                // 证书签名
-                DisclosureGroup(
-                    isExpanded: $showCertificateSettings,
-                    content: {
-                        VStack(alignment: .leading, spacing: 15) {
-                            // 证书文件
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("证书文件")
-                                    .fontWeight(.medium)
-                                
-                                HStack {
-                                    Button(action: {
-                                        let panel = NSOpenPanel()
-                                        panel.allowsMultipleSelection = false
-                                        panel.canChooseDirectories = false
-                                        panel.canCreateDirectories = false
-                                        panel.canChooseFiles = true
-                                        panel.allowedContentTypes = [.data]
-                                        
-                                        if panel.runModal() == .OK {
-                                            if let url = panel.url {
-                                                certificateFile = url
-                                            }
-                                        }
-                                    }) {
-                                        Text("选择证书文件")
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 6)
-                                            .background(Color.gray.opacity(0.2))
-                                            .cornerRadius(6)
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                    
-                                    Text(certificateFile?.lastPathComponent ?? "未选择文件")
-                                        .foregroundColor(.secondary)
-                                        .padding(.leading, 5)
-                                }
-                                
-                                Text("支持 .p12 或 .pfx 格式的证书文件")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            // 证书密码
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("证书密码")
-                                    .fontWeight(.medium)
-                                SecureField("输入证书密码", text: $certificatePassword)
-                                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                                Text("如果签名失败，请检查密码是否正确，或尝试不使用特殊字符的密码")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding()
-                    },
-                    label: {
-                        Text("证书签名 (可选)")
                             .font(.headline)
                     }
                 )
@@ -522,7 +454,7 @@ struct ContentView: View {
             icon: image,
             isRemovable: isRemovable,
             isFullScreen: isFullScreen,
-            organizationName: organizationName.isEmpty ? "WebClip Generator" : organizationName,
+            organizationName: organizationName.isEmpty ? appName : organizationName,
             description: profileDescription.isEmpty ? "Install this profile to add \(appName) to your Home screen" : profileDescription,
             consentText: consentText
         )
@@ -546,66 +478,23 @@ struct ContentView: View {
         if savePanel.runModal() == .OK {
             if let url = savePanel.url {
                 do {
-                    var dataToSave = configData
-                    
-                    // 尝试签名数据
-                    if showCertificateSettings {
-                        if let certPath = certificateFile?.path, !certificatePassword.isEmpty {
-                            // 使用用户提供的证书和密码
-                            do {
-                                dataToSave = try MobileConfigSigner.sign(
-                                    data: configData, 
-                                    certificatePath: certPath, 
-                                    password: certificatePassword
-                                )
-                            } catch MobileConfigSigner.SigningError.invalidPassword {
-                                let alert = NSAlert()
-                                alert.messageText = "签名失败"
-                                alert.informativeText = "证书密码不正确。将保存未签名的配置文件。"
-                                alert.alertStyle = .warning
-                                alert.addButton(withTitle: "确定")
-                                alert.runModal()
-                            } catch {
-                                let alert = NSAlert()
-                                alert.messageText = "签名失败"
-                                alert.informativeText = "证书签名过程中出现错误：\(error.localizedDescription)。将保存未签名的配置文件。"
-                                alert.alertStyle = .warning
-                                alert.addButton(withTitle: "确定")
-                                alert.runModal()
-                            }
-                        } else if certificateFile == nil {
-                            // 没有证书文件但启用了签名选项
-                            let alert = NSAlert()
-                            alert.messageText = "缺少证书"
-                            alert.informativeText = "您启用了证书签名但未选择证书文件。将保存未签名的配置文件。"
-                            alert.alertStyle = .warning
-                            alert.addButton(withTitle: "确定")
-                            alert.runModal()
-                        } else {
-                            // 有证书但没有密码
-                            let alert = NSAlert()
-                            alert.messageText = "缺少密码"
-                            alert.informativeText = "您选择了证书文件但未输入密码。将保存未签名的配置文件。"
-                            alert.alertStyle = .warning
-                            alert.addButton(withTitle: "确定")
-                            alert.runModal()
-                        }
-                    }
-                    
-                    // 保存文件
-                    try dataToSave.write(to: url)
+                    // 直接保存未签名的文件
+                    try configData.write(to: url)
                     
                     // 显示成功信息
-                    let isSigned = dataToSave != configData
                     let alert = NSAlert()
                     alert.messageText = "WebClip 生成成功！"
-                    alert.informativeText = "配置文件已\(isSigned ? "签名并" : "")保存到: \(url.path)"
+                    alert.informativeText = "配置文件已保存到: \(url.path)"
                     alert.alertStyle = .informational
-                    alert.addButton(withTitle: "确定")
+                    alert.addButton(withTitle: "确定并签名")
                     alert.addButton(withTitle: "在访达中显示")
+                    alert.addButton(withTitle: "仅保存")
                     
                     let response = alert.runModal()
-                    if response == .alertSecondButtonReturn {
+                    if response == .alertFirstButtonReturn {
+                        // 导航到签名页面
+                        coordinator.navigateToSignature(with: url)
+                    } else if response == .alertSecondButtonReturn {
                         NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
                     }
                 } catch {
@@ -645,6 +534,6 @@ struct RadioButtonField: View {
 
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
-        ContentView()
+        ContentView(coordinator: AppCoordinator())
     }
 }

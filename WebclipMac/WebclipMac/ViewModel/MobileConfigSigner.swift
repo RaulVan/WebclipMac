@@ -206,7 +206,6 @@ public class MobileConfigSigner {
         /usr/bin/openssl smime -sign -in "\(unsignedPath.path)" -out "\(signedPath.path)" \
         -signer "\(certPath.path)" -inkey "\(keyPath.path)" \
         -outform der -nodetach -binary
-        -md sha256
         """
         
         print("执行签名命令: \(signCommand)")

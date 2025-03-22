@@ -6,14 +6,17 @@
 //
 
 import SwiftUI
+import AppKit
 
 @main
 struct WebclipMacApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .frame(minWidth: 650, minHeight: 700)
+            MainView()
+                .frame(width: 800, height: 600)
         }
         .windowStyle(HiddenTitleBarWindowStyle())
+        .defaultSize(width: 800, height: 600)
+        .windowResizability(.contentSize)
     }
 }

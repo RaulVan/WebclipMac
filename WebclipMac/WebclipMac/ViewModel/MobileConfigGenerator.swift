@@ -8,11 +8,6 @@
 import Foundation
 import AppKit
 
-// 需要正确导入包含WebClipConfiguration的模块
-import WebclipMac
-
-// 直接使用项目内的类型，无需显式导入
-
 public class MobileConfigGenerator {
     static public func generateMobileConfig(config: WebClipConfiguration) -> Data? {
         guard let iconBase64 = config.iconToBase64() else {
