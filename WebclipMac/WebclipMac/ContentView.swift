@@ -35,7 +35,7 @@ struct ContentView: View {
     
     var isFormValid: Bool {
         return appName.count > 0 && URL(string: url) != nil && selectedImage != nil && 
-              nameError == nil && urlError == nil && imageError == nil
+              nameError == nil && urlError == nil
     }
     
     var body: some View {
@@ -302,41 +302,43 @@ struct ContentView: View {
     
     // 图片验证和处理
     private func validateAndProcessImage(_ image: NSImage) -> NSImage? {
-        let originalSize = image.size
-        
-        // 检查尺寸
-        if originalSize.width < 256 || originalSize.height < 256 {
-            imageError = "图片尺寸过小，最小要求256x256像素"
-            return nil
-        }
-        
-        if originalSize.width > 1024 || originalSize.height > 1024 {
-            imageError = "图片尺寸过大，已自动调整为1024x1024像素"
-            // 调整图片大小
-            return resizeImage(image, to: NSSize(width: 1024, height: 1024))
-        }
-        
-        // 检查是否为正方形
-        if abs(originalSize.width - originalSize.height) > 1 { // 允许1像素的误差
-            imageError = "图片必须是正方形，已自动裁剪"
-            // 裁剪为正方形
-            return cropToSquare(image)
-        }
-        
-        // 检查文件大小
-        if let imageData = image.tiffRepresentation,
-           let bitmap = NSBitmapImageRep(data: imageData),
-           let pngData = bitmap.representation(using: .png, properties: [:]) {
-            
-            let sizeInMB = Double(pngData.count) / (1024 * 1024)
-            if sizeInMB > 1.0 {
-                imageError = "图片已自动压缩以减小文件大小"
-                return compressImage(image)
-            }
-        }
-        
-        imageError = nil
         return image
+//        let originalSize = image.size
+//        
+//        // 检查尺寸
+//        if originalSize.width < 256 || originalSize.height < 256 {
+//            imageError = "图片尺寸过小，已自动放大至512x512像素"
+//            // 放大图片至512x512
+//            return resizeImage(image, to: NSSize(width: 512, height: 512))
+//        }
+//        
+//        if originalSize.width > 1024 || originalSize.height > 1024 {
+//            imageError = "图片尺寸过大，已自动缩小至512x512像素"
+//            // 缩小图片至512x512
+//            return resizeImage(image, to: NSSize(width: 512, height: 512))
+//        }
+//        
+//        // 检查是否为正方形
+//        if abs(originalSize.width - originalSize.height) > 1 { // 允许1像素的误差
+//            imageError = "图片必须是正方形，已自动裁剪"
+//            // 裁剪为正方形
+//            return cropToSquare(image)
+//        }
+//        
+//        // 检查文件大小
+//        if let imageData = image.tiffRepresentation,
+//           let bitmap = NSBitmapImageRep(data: imageData),
+//           let pngData = bitmap.representation(using: .png, properties: [:]) {
+//            
+//            let sizeInMB = Double(pngData.count) / (1024 * 1024)
+//            if sizeInMB > 1.0 {
+//                imageError = "图片已自动压缩以减小文件大小"
+//                return compressImage(image)
+//            }
+//        }
+//        
+//        imageError = nil
+//        return image
     }
     
     // 图片处理功能

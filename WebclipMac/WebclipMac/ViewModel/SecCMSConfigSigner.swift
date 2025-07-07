@@ -71,36 +71,14 @@ public class SecCMSConfigSigner {
             throw SigningError.invalidData
         }
         
-        do {
-            // 调用Objective-C桥接方法进行签名 - 使用Swift throws语法
-            
-            let signedData = try CMSHelper.sign(data, withP12Data: p12Data, password: password)
-            return signedData
-        } catch let error as NSError {
-            // 转换Objective-C错误到我们的自定义错误类型
-            switch error.code {
-            case 1000: // CMSHelperErrorCodeIdentityLoadFailed
-                throw SigningError.identityLoadFailed(error.code, error.localizedDescription)
-            case 1001: // CMSHelperErrorCodeEncoderCreationFailed
-                throw SigningError.encoderCreationFailed
-            case 1002: // CMSHelperErrorCodeFailedToAddSigner
-                throw SigningError.failedToAddSigner(error.code)
-            case 1003: // CMSHelperErrorCodeFailedToUpdateContent
-                throw SigningError.failedToUpdateContent(error.code)
-            case 1004: // CMSHelperErrorCodeFailedToEncodeContent
-                throw SigningError.failedToEncodeContent(error.code)
-            case 1005: // CMSHelperErrorCodeCertificateImportFailed
-                throw SigningError.certificateImportFailed(error.code)
-            case 1006: // CMSHelperErrorCodeIdentityCreationFailed
-                throw SigningError.identityCreationFailed
-            case 1007: // CMSHelperErrorCodeInvalidPassword
-                throw SigningError.invalidPassword
-            case 1008: // CMSHelperErrorCodeInvalidData
-                throw SigningError.invalidData
-            default:
-                throw SigningError.unknown(error)
-            }
+        // 调用Objective-C桥接方法进行签名
+        // 使用Swift简化的方法名，CMSHelper内部会处理详细错误
+        guard let signedData = CMSHelper.sign(data, withP12Data: p12Data, password: password) else {
+            // 简化错误处理，实际错误信息已在CMSHelper中打印到控制台
+            throw SigningError.unknown(NSError(domain: "SecCMSConfigSigner", code: -1, userInfo: [NSLocalizedDescriptionKey: "CMS签名失败，请检查证书文件和密码"]))
         }
+        
+        return signedData
     }
     
     /// 检查签名是否可用

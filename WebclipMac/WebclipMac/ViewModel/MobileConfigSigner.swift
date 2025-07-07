@@ -253,21 +253,32 @@ public class MobileConfigSigner {
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = ["-c", command]
         
-        // 捕获输出和错误
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
+        // 创建临时文件来捕获输出，避免NSXPCDecoder问题
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+        let outputFile = tempDir.appendingPathComponent("cmd_output_\(UUID().uuidString).txt")
+        let errorFile = tempDir.appendingPathComponent("cmd_error_\(UUID().uuidString).txt")
+        
+        // 重定向输出到文件
+        let redirectedCommand = "\(command) > \"\(outputFile.path)\" 2> \"\(errorFile.path)\""
+        process.arguments = ["-c", redirectedCommand]
         
         do {
             try process.run()
             process.waitUntilExit()
             
-            // 始终捕获并记录输出和错误
-            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: outputData, encoding: .utf8) ?? ""
-            let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
+            // 从文件读取输出和错误
+            var output = ""
+            var errorOutput = ""
+            
+            if FileManager.default.fileExists(atPath: outputFile.path) {
+                output = (try? String(contentsOf: outputFile, encoding: .utf8)) ?? ""
+                try? FileManager.default.removeItem(at: outputFile)
+            }
+            
+            if FileManager.default.fileExists(atPath: errorFile.path) {
+                errorOutput = (try? String(contentsOf: errorFile, encoding: .utf8)) ?? ""
+                try? FileManager.default.removeItem(at: errorFile)
+            }
             
             if !output.isEmpty {
                 print("命令输出: \(output)")
@@ -291,8 +302,14 @@ public class MobileConfigSigner {
             
             return process.terminationStatus
         } catch let error as SigningError {
+            // 确保清理临时文件
+            try? FileManager.default.removeItem(at: outputFile)
+            try? FileManager.default.removeItem(at: errorFile)
             throw error
         } catch {
+            // 确保清理临时文件
+            try? FileManager.default.removeItem(at: outputFile)
+            try? FileManager.default.removeItem(at: errorFile)
             print("执行命令过程中出错: \(error.localizedDescription)")
             throw SigningError.openSSLCommandFailed(-1, "执行命令过程中出错: \(error.localizedDescription)")
         }
@@ -315,12 +332,7 @@ public class MobileConfigSigner {
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
             process.arguments = ["-c", command]
             
-            // 捕获输出
-            let outputPipe = Pipe()
-            let errorPipe = Pipe()
-            process.standardOutput = outputPipe
-            process.standardError = errorPipe
-            
+            // 避免使用Pipe，简单运行命令
             try process.run()
             process.waitUntilExit()
             

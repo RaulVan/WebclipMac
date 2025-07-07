@@ -12,7 +12,8 @@ import Foundation
 struct SignatureView: View {
     // UserDefaults 键名
     private let kLastCertificatePathKey = "lastCertificatePath"
-    private let kLastCertificatePasswordKey = "lastCertificatePassword"
+    private let kCertificatePasswordsKey = "certificatePasswords"
+    private let kLastUsedCertificateKey = "lastUsedCertificate"
     
     // 添加coordinator
     @ObservedObject var coordinator: AppCoordinator
@@ -27,11 +28,54 @@ struct SignatureView: View {
     @State private var fileChooserType: FileChooserType = .mobileConfigFile
     @State private var useNativeSigningMethod: Bool = true // 默认使用原生签名
     
-    @AppStorage("lastCertificatePath") private var lastCertificatePath: String = ""
+    @AppStorage("lastUsedCertificate") private var lastUsedCertificate: String = ""
+    @State private var certificatePasswords: [String: String] = [:] // 证书ID -> 密码的映射
+    
+    // 系统证书相关
+    @StateObject private var certificateManager = CertificateManager()
+    @State private var selectedSystemCertificate: CertificateInfo?
+    @State private var useSystemCertificate: Bool = true
     
     enum FileChooserType {
         case mobileConfigFile
         case certificateFile
+    }
+    
+    // 获取应用的证书存储目录
+    private var certificatesDirectory: URL? {
+        do {
+            // 在Application Support目录中创建证书存储目录
+            let appSupport = try FileManager.default.url(for: .applicationSupportDirectory, 
+                                                       in: .userDomainMask, 
+                                                       appropriateFor: nil, 
+                                                       create: true)
+            let bundleID = Bundle.main.bundleIdentifier ?? "com.webclip.mac"
+            let certDir = appSupport.appendingPathComponent(bundleID).appendingPathComponent("Certificates")
+            
+            // 确保目录存在
+            if !FileManager.default.fileExists(atPath: certDir.path) {
+                try FileManager.default.createDirectory(at: certDir, withIntermediateDirectories: true, attributes: nil)
+            }
+            
+            return certDir
+        } catch {
+            print("创建证书存储目录失败: \(error.localizedDescription)")
+            return nil
+        }
+    }
+    
+    // 证书ID的生成方式（使用文件名和创建日期作为唯一标识）
+    private func certificateID(for url: URL) -> String {
+        let fileName = url.lastPathComponent
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMddHHmmss"
+        let dateString = dateFormatter.string(from: Date())
+        return "\(fileName)_\(dateString)"
+    }
+    
+    // 从ID获取证书在沙盒中的URL
+    private func certificateURL(for id: String) -> URL? {
+        return certificatesDirectory?.appendingPathComponent(id)
     }
     
     // 内部使用的签名错误类型
@@ -56,7 +100,13 @@ struct SignatureView: View {
     }
     
     var isFormValid: Bool {
-        return mobileConfigFile != nil && certificateFile != nil && !certificatePassword.isEmpty && !isSigning
+        guard mobileConfigFile != nil && !isSigning else { return false }
+        
+        if useSystemCertificate {
+            return selectedSystemCertificate != nil
+        } else {
+            return certificateFile != nil && !certificatePassword.isEmpty
+        }
     }
     
     var body: some View {
@@ -107,50 +157,130 @@ struct SignatureView: View {
                 // 证书设置
                 GroupBox(label: Text("证书设置").font(.headline)) {
                     VStack(alignment: .leading, spacing: 15) {
-                        // 证书文件
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("证书文件")
+                        // 证书类型选择
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("证书来源")
                                 .fontWeight(.medium)
                             
-                            HStack {
-                                if let url = certificateFile {
-                                    Text(url.lastPathComponent)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
+                            Picker("证书来源", selection: $useSystemCertificate) {
+                                Text("证书文件").tag(false)
+                                Text("系统证书").tag(true)
+                            }
+                            .pickerStyle(SegmentedPickerStyle())
+                            .onChange(of: useSystemCertificate) { _ in
+                                // 切换证书类型时清空相关状态
+                                if useSystemCertificate {
+                                    certificateFile = nil
+                                    certificatePassword = ""
                                 } else {
-                                    Text("未选择证书")
-                                        .foregroundColor(.secondary)
-                                }
-                                
-                                Spacer()
-                                
-                                Button("选择证书") {
-                                    selectCertificateFile()
+                                    selectedSystemCertificate = nil
                                 }
                             }
-                            .padding(10)
-                            .background(Color(.textBackgroundColor))
-                            .cornerRadius(6)
-                            
-                            Text("支持 .p12 或 .pfx 格式的证书文件")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
                         }
                         
-                        // 证书密码
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("证书密码")
-                                .fontWeight(.medium)
-                            SecureField("输入证书密码", text: $certificatePassword)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .onChange(of: certificatePassword) { newValue in
-                                    // 保存密码到 UserDefaults
-                                    UserDefaults.standard.set(newValue, forKey: kLastCertificatePasswordKey)
+                        if useSystemCertificate {
+                            // 系统证书选择
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("选择系统证书")
+                                    .fontWeight(.medium)
+                                
+                                Menu {
+                                    Button("无") {
+                                        selectedSystemCertificate = nil
+                                    }
+                                    
+                                    ForEach(certificateManager.availableCertificates) { cert in
+                                        Button(cert.name) {
+                                            selectedSystemCertificate = cert
+                                        }
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(selectedSystemCertificate?.name ?? "选择证书")
+                                            .foregroundColor(selectedSystemCertificate != nil ? .primary : .secondary)
+                                        Spacer()
+                                        Image(systemName: "chevron.down")
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .padding(10)
+                                    .background(Color(.textBackgroundColor))
+                                    .cornerRadius(6)
                                 }
-                            Text("如果签名失败，请检查密码是否正确，或尝试不使用特殊字符的密码")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                                
+                                if certificateManager.availableCertificates.isEmpty {
+                                    Text("未找到可用的Apple开发者证书")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                } else {
+                                    Text("从钥匙串中选择Apple开发者证书")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                HStack {
+                                    Button("刷新证书列表") {
+                                        certificateManager.loadSystemCertificates()
+                                    }
+                                    .font(.caption)
+                                    
+                                    Spacer()
+                                }
+                            }
+                        } else {
+                            // 证书文件选择
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text("证书文件")
+                                        .fontWeight(.medium)
+                                    Text("(可选)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                
+                                HStack {
+                                    if let url = certificateFile {
+                                        Text(url.lastPathComponent)
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    } else {
+                                        Text("未选择证书")
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Button("选择证书") {
+                                        selectCertificateFile()
+                                    }
+                                }
+                                .padding(10)
+                                .background(Color(.textBackgroundColor))
+                                .cornerRadius(6)
+                                
+                                Text("支持 .p12 或 .pfx 格式的证书文件")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            // 证书密码
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text("证书密码")
+                                        .fontWeight(.medium)
+                                    Text("(可选)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                SecureField("输入证书密码", text: $certificatePassword)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    .onChange(of: certificatePassword) { newValue in
+                                        handlePasswordChange(newValue)
+                                    }
+                                Text("如果签名失败，请检查密码是否正确，或尝试不使用特殊字符的密码")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                         
                         // 签名方法选择
@@ -206,8 +336,11 @@ struct SignatureView: View {
         }
     }
     
-    // onAppear修改以处理从coordinator获取的文件
+    // onAppear修改以处理从coordinator获取的文件和加载保存的证书密码
     private func checkLastGeneratedFile() {
+        // 从UserDefaults加载证书密码字典
+        loadCertificatePasswords()
+        
         if let fileURL = coordinator.lastGeneratedFile {
             mobileConfigFile = fileURL
             status = "文件已加载: \(fileURL.lastPathComponent)"
@@ -216,14 +349,31 @@ struct SignatureView: View {
         }
         
         // 检查上次使用的证书是否存在
-        if !lastCertificatePath.isEmpty {
-            let fileURL = URL(fileURLWithPath: lastCertificatePath)
-            if FileManager.default.fileExists(atPath: fileURL.path) {
-                certificateFile = fileURL
+        if !lastUsedCertificate.isEmpty, let certURL = certificateURL(for: lastUsedCertificate) {
+            if FileManager.default.fileExists(atPath: certURL.path) {
+                certificateFile = certURL
+                // 恢复保存的密码
+                certificatePassword = certificatePasswords[lastUsedCertificate] ?? ""
             } else {
-                // 证书文件不存在，清除保存的路径
-                lastCertificatePath = ""
+                // 证书文件不存在，清除保存的最后使用证书路径
+                lastUsedCertificate = ""
+                // 但不清除证书密码映射，因为其他证书可能还存在
             }
+        }
+    }
+    
+    // 加载保存的证书密码映射
+    private func loadCertificatePasswords() {
+        if let data = UserDefaults.standard.data(forKey: kCertificatePasswordsKey),
+           let passwords = try? JSONDecoder().decode([String: String].self, from: data) {
+            certificatePasswords = passwords
+        }
+    }
+    
+    // 保存证书密码映射
+    private func saveCertificatePasswords() {
+        if let data = try? JSONEncoder().encode(certificatePasswords) {
+            UserDefaults.standard.set(data, forKey: kCertificatePasswordsKey)
         }
     }
     
@@ -244,6 +394,25 @@ struct SignatureView: View {
         }
     }
     
+    // 将外部证书复制到应用沙盒中
+    private func importCertificateToSandbox(from externalURL: URL) -> (id: String, url: URL)? {
+        guard let certsDir = certificatesDirectory else { return nil }
+        
+        do {
+            // 生成唯一的证书ID
+            let certID = certificateID(for: externalURL)
+            let destinationURL = certsDir.appendingPathComponent(certID)
+            
+            // 复制证书文件到沙盒目录
+            try FileManager.default.copyItem(at: externalURL, to: destinationURL)
+            
+            return (certID, destinationURL)
+        } catch {
+            print("复制证书到沙盒失败: \(error.localizedDescription)")
+            return nil
+        }
+    }
+    
     private func selectCertificateFile() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
@@ -254,14 +423,38 @@ struct SignatureView: View {
         
         if panel.runModal() == .OK {
             if let url = panel.url {
-                certificateFile = url
-                status = ""
-                isStatusError = false
-                
-                // 保存证书路径到 UserDefaults
-                UserDefaults.standard.set(url.path, forKey: kLastCertificatePathKey)
-                lastCertificatePath = url.path
+                // 将证书复制到沙盒目录
+                if let (certID, sandboxURL) = importCertificateToSandbox(from: url) {
+                    certificateFile = sandboxURL
+                    status = "证书已导入: \(url.lastPathComponent)"
+                    isStatusError = false
+                    
+                    // 保存当前使用的证书ID
+                    lastUsedCertificate = certID
+                    
+                    // 检查是否有保存的密码
+                    if let savedPassword = certificatePasswords[certID], !savedPassword.isEmpty {
+                        certificatePassword = savedPassword
+                    } else {
+                        // 新证书，清空密码输入框
+                        certificatePassword = ""
+                    }
+                } else {
+                    status = "证书导入失败"
+                    isStatusError = true
+                }
             }
+        }
+    }
+    
+    // 处理密码变化
+    private func handlePasswordChange(_ newValue: String) {
+        certificatePassword = newValue
+        
+        // 保存密码到证书密码映射
+        if lastUsedCertificate.isEmpty == false {
+            certificatePasswords[lastUsedCertificate] = newValue
+            saveCertificatePasswords()
         }
     }
     
@@ -284,16 +477,90 @@ struct SignatureView: View {
     private func signMobileConfigFile() {
         guard let mobileConfigURL = mobileConfigFile else { return }
         
-        // 检查证书文件是否存在
-        if certificateFile == nil && UserDefaults.standard.string(forKey: kLastCertificatePathKey) != nil {
-            // 尝试重新加载保存的证书路径
-            checkLastGeneratedFile()
+        if useSystemCertificate {
+            // 使用系统证书签名
+            guard let systemCert = selectedSystemCertificate else { return }
+            signWithSystemCertificate(mobileConfigURL, certificate: systemCert)
+        } else {
+            // 使用证书文件签名
+            // 检查证书文件是否存在
+            if certificateFile == nil && !lastUsedCertificate.isEmpty, 
+               let certURL = certificateURL(for: lastUsedCertificate) {
+                if FileManager.default.fileExists(atPath: certURL.path) {
+                    certificateFile = certURL
+                    certificatePassword = certificatePasswords[lastUsedCertificate] ?? ""
+                } else {
+                    lastUsedCertificate = ""
+                }
+            }
+            
+            guard let certURL = certificateFile, !certificatePassword.isEmpty else { return }
+            signWithCertificateFile(mobileConfigURL, certificateURL: certURL)
         }
+    }
+    
+    // 使用系统证书签名
+    private func signWithSystemCertificate(_ mobileConfigURL: URL, certificate: CertificateInfo) {
+        isSigning = true
+        status = "正在使用系统证书签名..."
+        isStatusError = false
         
-        guard let certURL = certificateFile, !certificatePassword.isEmpty else { return }
-        
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                // 读取 mobileconfig 文件数据
+                let configData = try Data(contentsOf: mobileConfigURL)
+                
+                // 使用系统证书签名
+                let signedData = try certificateManager.signWithSystemCertificate(configData, using: certificate)
+                
+                // 创建新的文件名（添加signed_前缀）
+                let originalFileName = mobileConfigURL.lastPathComponent
+                let signedFileName = "signed_" + originalFileName
+                
+                // 弹出保存对话框
+                DispatchQueue.main.async {
+                    let savePanel = NSSavePanel()
+                    savePanel.allowedContentTypes = [UTType(filenameExtension: "mobileconfig") ?? .data]
+                    savePanel.nameFieldStringValue = signedFileName
+                    savePanel.title = "保存已签名的配置文件"
+                    
+                    if savePanel.runModal() == .OK {
+                        if let saveURL = savePanel.url {
+                            do {
+                                try signedData.write(to: saveURL)
+                                isSigning = false
+                                status = "签名成功！文件已保存为: \(saveURL.lastPathComponent)"
+                                isStatusError = false
+                            } catch {
+                                isSigning = false
+                                status = "保存文件失败：\(error.localizedDescription)"
+                                isStatusError = true
+                            }
+                        } else {
+                            isSigning = false
+                            status = "操作已取消"
+                            isStatusError = false
+                        }
+                    } else {
+                        isSigning = false
+                        status = "操作已取消"
+                        isStatusError = false
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    isSigning = false
+                    status = "系统证书签名失败：\(error.localizedDescription)"
+                    isStatusError = true
+                }
+            }
+        }
+    }
+    
+    // 使用证书文件签名
+    private func signWithCertificateFile(_ mobileConfigURL: URL, certificateURL: URL) {
         // 最后一次检查文件是否存在
-        guard FileManager.default.fileExists(atPath: certURL.path) else {
+        guard FileManager.default.fileExists(atPath: certificateURL.path) else {
             status = "证书文件不存在或已被移动"
             isStatusError = true
             certificateFile = nil
@@ -317,7 +584,7 @@ struct SignatureView: View {
                     do {
                         signedData = try SecCMSConfigSigner.sign(
                             data: configData,
-                            certificatePath: certURL.path,
+                            certificatePath: certificateURL.path,
                             password: certificatePassword
                         )
                     } catch let error as SecCMSConfigSigner.SigningError {
@@ -336,7 +603,7 @@ struct SignatureView: View {
                 } else {
                     // 使用 OpenSSL 命令行进行签名
                     // 复制证书文件到临时目录（避免中文路径和权限问题）
-                    guard let tempCertURL = copyFileToTempDirectory(from: certURL) else {
+                    guard let tempCertURL = copyFileToTempDirectory(from: certificateURL) else {
                         throw SignViewError.fileAccessError
                     }
                     
@@ -365,19 +632,39 @@ struct SignatureView: View {
                     try? FileManager.default.removeItem(at: tempCertURL.deletingLastPathComponent())
                 }
                 
-                // 创建新的文件名（添加sign_前缀）
+                // 创建新的文件名（添加signed_前缀）
                 let originalFileName = mobileConfigURL.lastPathComponent
-                let signedFileName = "sign_" + originalFileName
-                let signedFileURL = mobileConfigURL.deletingLastPathComponent().appendingPathComponent(signedFileName)
+                let signedFileName = "signed_" + originalFileName
                 
-                // 保存签名后的文件
-                try signedData.write(to: signedFileURL)
-                
-                // 更新 UI
+                // 弹出保存对话框
                 DispatchQueue.main.async {
-                    isSigning = false
-                    status = "签名成功！文件已保存为: \(signedFileName)"
-                    isStatusError = false
+                    let savePanel = NSSavePanel()
+                    savePanel.allowedContentTypes = [UTType(filenameExtension: "mobileconfig") ?? .data]
+                    savePanel.nameFieldStringValue = signedFileName
+                    savePanel.title = "保存已签名的配置文件"
+                    
+                    if savePanel.runModal() == .OK {
+                        if let saveURL = savePanel.url {
+                            do {
+                                try signedData.write(to: saveURL)
+                                isSigning = false
+                                status = "签名成功！文件已保存为: \(saveURL.lastPathComponent)"
+                                isStatusError = false
+                            } catch {
+                                isSigning = false
+                                status = "保存文件失败：\(error.localizedDescription)"
+                                isStatusError = true
+                            }
+                        } else {
+                            isSigning = false
+                            status = "操作已取消"
+                            isStatusError = false
+                        }
+                    } else {
+                        isSigning = false
+                        status = "操作已取消"
+                        isStatusError = false
+                    }
                 }
             } catch let error as SignViewError {
                 DispatchQueue.main.async {

@@ -203,6 +203,35 @@ typedef NS_ENUM(NSInteger, CMSHelperErrorCode) {
     return signedData;
 }
 
+// 简化的签名方法，内部处理错误并打印到控制台
++ (NSData *)signData:(NSData *)data 
+        withP12Data:(NSData *)p12Data 
+           password:(NSString *)password {
+    NSError *error = nil;
+    NSData *result = [self signData:data withP12Data:p12Data password:password error:&error];
+    
+    // 如果有错误，打印到控制台以便调试
+    if (error != nil) {
+        NSLog(@"CMSHelper签名失败: %@ (代码: %ld)", error.localizedDescription, (long)error.code);
+    }
+    
+    return result;
+}
+
+// 简化的CMS签名方法，内部处理错误并打印到控制台
++ (NSData *)signDataWithCMS:(NSData *)data 
+                   identity:(SecIdentityRef)identity {
+    NSError *error = nil;
+    NSData *result = [self signDataWithCMS:data identity:identity error:&error];
+    
+    // 如果有错误，打印到控制台以便调试
+    if (error != nil) {
+        NSLog(@"CMSHelper CMS签名失败: %@ (代码: %ld)", error.localizedDescription, (long)error.code);
+    }
+    
+    return result;
+}
+
 // 检查签名功能是否可用
 + (BOOL)isSigningAvailable {
     CMSEncoderRef encoder = NULL;
