@@ -1,8 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-
-SwiftUI 项目，使用 MVVM框架，遵循设计规范，每个文件代码功能单一。
-Swift项目不需要添加显式导入或者显式导入项目内的类型。
