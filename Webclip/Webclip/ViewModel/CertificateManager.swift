@@ -15,6 +15,79 @@ struct CertificateInfo: Identifiable, Hashable {
     let name: String
     let identity: SecIdentity
     let commonName: String
+    let expirationDate: Date?
+    let notBeforeDate: Date?
+    let issuerName: String?
+    let certificateType: String
+    let isExpired: Bool
+    let daysUntilExpiration: Int?
+    
+    // 格式化的到期时间字符串
+    var expirationDateString: String {
+        guard let date = expirationDate else { return "未知" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy年M月d日 HH:mm:ss"
+        formatter.timeZone = TimeZone.current
+        return formatter.string(from: date)
+    }
+    
+    // 简短的到期时间字符串（用于下拉列表）
+    var shortExpirationString: String {
+        guard let date = expirationDate else { return "未知" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy/M/d"
+        formatter.timeZone = TimeZone.current
+        return formatter.string(from: date)
+    }
+    
+    // 签发时间字符串
+    var notBeforeDateString: String {
+        guard let date = notBeforeDate else { return "未知" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy年M月d日"
+        formatter.timeZone = TimeZone.current
+        return formatter.string(from: date)
+    }
+    
+    // 到期信息描述
+    var expirationInfo: String {
+        if let date = expirationDate {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy年M月d日"
+            formatter.timeZone = TimeZone.current
+            if isExpired {
+                return "已于 \(formatter.string(from: date)) 过期"
+            } else if let days = daysUntilExpiration {
+                if days <= 30 {
+                    return "\(days)天后过期"
+                }
+                return "到期: \(formatter.string(from: date))"
+            }
+            return "到期: \(formatter.string(from: date))"
+        }
+        return ""
+    }
+    
+    // 到期状态描述
+    var expirationStatus: String {
+        if isExpired {
+            return "已过期"
+        }
+        guard let days = daysUntilExpiration else { return "" }
+        if days <= 30 {
+            return "即将过期(\(days)天)"
+        }
+        return ""
+    }
+    
+    // 显示名称（包含到期日期）
+    var displayName: String {
+        if isExpired {
+            return "\(name) [已过期:\(shortExpirationString)]"
+        }
+        // 显示证书名称 + 到期日期
+        return "\(name) [\(shortExpirationString)]"
+    }
     
     func hash(into hasher: inout Hasher) {
         hasher.combine(name)
@@ -66,7 +139,18 @@ class CertificateManager: ObservableObject {
             }
         }
         
-        return certificates.sorted { $0.name < $1.name }
+        // 按到期时间排序，未过期的在前，过期的在后
+        return certificates.sorted { cert1, cert2 in
+            // 未过期的排在前面
+            if cert1.isExpired != cert2.isExpired {
+                return !cert1.isExpired
+            }
+            // 同样状态的按到期时间排序
+            if let date1 = cert1.expirationDate, let date2 = cert2.expirationDate {
+                return date1 < date2
+            }
+            return cert1.name < cert2.name
+        }
     }
     
     // 从SecIdentity中提取证书信息
@@ -83,13 +167,77 @@ class CertificateManager: ObservableObject {
             return nil
         }
         
-        // 获取证书的主题名称
-        let subjectName = getSubjectName(from: cert) ?? commonName
+        // 获取证书的主题名称（使用 SecCertificateCopySubjectSummary）
+        let subjectName = SecCertificateCopySubjectSummary(cert) as String? ?? commonName
+        
+        // 获取证书到期时间
+        let expirationDate = getExpirationDate(from: cert)
+        
+        // 获取证书签发时间
+        let notBeforeDate = getNotBeforeDate(from: cert)
+        
+        // 获取颁发机构
+        let issuerName = getIssuerName(from: cert)
+        
+        // 调试输出
+        print("=== 证书信息 ===")
+        print("📜 名称: \(subjectName)")
+        if let issuer = issuerName {
+            print("🏢 颁发机构: \(issuer)")
+        }
+        if let notBefore = notBeforeDate {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            formatter.timeZone = TimeZone.current
+            print("🕓 签发日期: \(formatter.string(from: notBefore))")
+        }
+        if let expDate = expirationDate {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            formatter.timeZone = TimeZone.current
+            print("⏰ 到期日期: \(formatter.string(from: expDate))")
+        } else {
+            print("⏰ 到期日期: 未能获取")
+        }
+        
+        // 计算是否过期和剩余天数
+        let isExpired: Bool
+        let daysUntilExpiration: Int?
+        
+        if let expDate = expirationDate {
+            let now = Date()
+            isExpired = expDate < now
+            if !isExpired {
+                let calendar = Calendar.current
+                let components = calendar.dateComponents([.day], from: now, to: expDate)
+                daysUntilExpiration = components.day
+                print("📅 剩余有效期: \(daysUntilExpiration ?? 0) 天")
+                if let days = daysUntilExpiration, days < 30 {
+                    print("⚠️ 证书即将过期！请尽快更新。")
+                }
+            } else {
+                daysUntilExpiration = nil
+                print("❌ 状态: 已过期")
+            }
+        } else {
+            isExpired = false
+            daysUntilExpiration = nil
+        }
+        print("===============================")
+        
+        // 获取证书类型
+        let certType = getCertificateType(subjectName)
         
         return CertificateInfo(
             name: subjectName,
             identity: identity,
-            commonName: commonName
+            commonName: commonName,
+            expirationDate: expirationDate,
+            notBeforeDate: notBeforeDate,
+            issuerName: issuerName,
+            certificateType: certType,
+            isExpired: isExpired,
+            daysUntilExpiration: daysUntilExpiration
         )
     }
     
@@ -105,10 +253,90 @@ class CertificateManager: ObservableObject {
         return name as String
     }
     
-    // 获取证书的主题名称
-    private func getSubjectName(from certificate: SecCertificate) -> String? {
-        // 为了简化实现，暂时返回nil，让调用方使用CommonName
-        // 如果需要完整的主题名称，可以使用SecCertificateCopySubjectSummary等API
+    
+    // 从证书属性字典中提取日期值（处理 Date、Double、NSNumber 多种类型）
+    private func extractDate(from values: [String: Any], key: CFString) -> Date? {
+        guard let dict = values[key as String] as? [String: Any],
+              let value = dict[kSecPropertyKeyValue as String] else {
+            return nil
+        }
+        
+        // 处理多种可能的日期类型
+        if let date = value as? Date {
+            return date
+        } else if let timeInterval = value as? Double {
+            // macOS 有时返回自 2001-01-01 起的秒数
+            return Date(timeIntervalSinceReferenceDate: timeInterval)
+        } else if let timeInterval = value as? NSNumber {
+            return Date(timeIntervalSinceReferenceDate: timeInterval.doubleValue)
+        }
+        return nil
+    }
+    
+    // 获取证书的到期时间
+    private func getExpirationDate(from certificate: SecCertificate) -> Date? {
+        // 获取指定的证书属性
+        let keys = [
+            kSecOIDX509V1ValidityNotAfter
+        ] as CFArray
+        
+        guard let values = SecCertificateCopyValues(certificate, keys, nil) as? [String: Any] else {
+            print("无法获取证书属性")
+            return nil
+        }
+        
+        return extractDate(from: values, key: kSecOIDX509V1ValidityNotAfter)
+    }
+    
+    // 获取证书的签发时间
+    private func getNotBeforeDate(from certificate: SecCertificate) -> Date? {
+        let keys = [
+            kSecOIDX509V1ValidityNotBefore
+        ] as CFArray
+        
+        guard let values = SecCertificateCopyValues(certificate, keys, nil) as? [String: Any] else {
+            return nil
+        }
+        
+        return extractDate(from: values, key: kSecOIDX509V1ValidityNotBefore)
+    }
+    
+    // 获取证书的颁发机构
+    private func getIssuerName(from certificate: SecCertificate) -> String? {
+        let keys = [kSecOIDX509V1IssuerName] as CFArray
+        
+        guard let values = SecCertificateCopyValues(certificate, keys, nil) as? [String: Any] else {
+            return nil
+        }
+        
+        if let issuerDict = values[kSecOIDX509V1IssuerName as String] as? [String: Any],
+           let issuerValue = issuerDict[kSecPropertyKeyValue as String] {
+            // 颁发机构可能是数组或字符串
+            if let issuerArray = issuerValue as? [[String: Any]] {
+                // 优先查找 Common Name (OID 2.5.4.3)
+                let commonName = issuerArray.first { ($0[kSecPropertyKeyLabel as String] as? String) == "2.5.4.3" }
+                if let value = commonName?[kSecPropertyKeyValue as String] as? String {
+                    return value
+                }
+                // 备用：查找包含 "Common Name" 或 "Organization" 的项
+                for item in issuerArray {
+                    if let label = item[kSecPropertyKeyLabel as String] as? String,
+                       let value = item[kSecPropertyKeyValue as String] as? String {
+                        if label.contains("Common Name") || label.contains("Organization") || label == "2.5.4.10" {
+                            return value
+                        }
+                    }
+                }
+                // 如果都没找到，返回第一个值
+                if let firstItem = issuerArray.first,
+                   let value = firstItem[kSecPropertyKeyValue as String] as? String {
+                    return value
+                }
+            } else if let issuerStr = issuerValue as? String {
+                return issuerStr
+            }
+        }
+        
         return nil
     }
     
@@ -133,6 +361,12 @@ class CertificateManager: ObservableObject {
     
     // 检查证书是否可用于签名
     func validateCertificateForSigning(_ certificate: CertificateInfo) -> Bool {
+        // 检查证书是否已过期
+        if certificate.isExpired {
+            print("证书 \(certificate.name) 已过期")
+            return false
+        }
+        
         // 检查身份标识是否包含私钥
         var privateKey: SecKey?
         let status = SecIdentityCopyPrivateKey(certificate.identity, &privateKey)
@@ -169,9 +403,16 @@ class CertificateManager: ObservableObject {
         
         // 基本信息
         details["通用名称"] = certificate.commonName
-        details["证书类型"] = getCertificateType(certificate.name)
+        details["证书类型"] = certificate.certificateType
+        details["到期时间"] = certificate.expirationDateString
         
-        // 可以添加更多详细信息，如有效期、颁发者等
+        if certificate.isExpired {
+            details["状态"] = "已过期"
+        } else if let days = certificate.daysUntilExpiration {
+            details["状态"] = "有效（剩余\(days)天）"
+        } else {
+            details["状态"] = "有效"
+        }
         
         return details
     }
@@ -206,6 +447,13 @@ class CertificateManager: ObservableObject {
             ])
         }
         
+        // 检查证书是否过期
+        if certificate.isExpired {
+            throw NSError(domain: "CertificateManager", code: 4, userInfo: [
+                NSLocalizedDescriptionKey: "证书 \(certificate.name) 已过期，无法用于签名"
+            ])
+        }
+        
         // 验证证书是否可用于签名
         guard validateCertificateForSigning(certificate) else {
             throw NSError(domain: "CertificateManager", code: 5, userInfo: [
@@ -227,4 +475,4 @@ class CertificateManager: ObservableObject {
         print("系统证书签名成功，签名数据大小: \(signedData.count) bytes")
         return signedData
     }
-} 
+}

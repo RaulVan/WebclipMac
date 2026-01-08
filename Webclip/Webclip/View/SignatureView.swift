@@ -85,15 +85,61 @@ struct SignatureView: View {
                                     selectedSystemCertificate = nil
                                 }
                                 
+                                Divider()
+                                
                                 ForEach(certificateManager.availableCertificates) { cert in
-                                    Button(cert.name) {
+                                    Button(action: {
                                         selectedSystemCertificate = cert
+                                    }) {
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(cert.name)
+                                                HStack(spacing: 4) {
+                                                    Text(cert.certificateType)
+                                                    if !cert.expirationInfo.isEmpty {
+                                                        Text("·")
+                                                        Text(cert.expirationInfo)
+                                                    }
+                                                }
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                            }
+                                            Spacer()
+                                            if cert.isExpired {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.red)
+                                            } else if let days = cert.daysUntilExpiration, days <= 30 {
+                                                Image(systemName: "exclamationmark.triangle.fill")
+                                                    .foregroundColor(.orange)
+                                            } else {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundColor(.green)
+                                            }
+                                        }
                                     }
+                                    .disabled(cert.isExpired)
                                 }
                             } label: {
                                 HStack {
-                                    Text(selectedSystemCertificate?.name ?? "选择证书")
-                                        .foregroundColor(selectedSystemCertificate != nil ? .primary : .secondary)
+                                    if let cert = selectedSystemCertificate {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(cert.name)
+                                                .foregroundColor(.primary)
+                                                .lineLimit(1)
+                                            HStack(spacing: 4) {
+                                                Text(cert.certificateType)
+                                                if !cert.expirationInfo.isEmpty {
+                                                    Text("·")
+                                                    Text(cert.expirationInfo)
+                                                }
+                                            }
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        }
+                                    } else {
+                                        Text("选择证书")
+                                            .foregroundColor(.secondary)
+                                    }
                                     Spacer()
                                     Image(systemName: "chevron.down")
                                         .foregroundColor(.secondary)
@@ -107,6 +153,20 @@ struct SignatureView: View {
                                 Text("未找到可用的Apple开发者证书")
                                     .font(.caption)
                                     .foregroundColor(.orange)
+                            } else if let cert = selectedSystemCertificate {
+                                if cert.isExpired {
+                                    Text("所选证书已过期，请选择其他证书")
+                                        .font(.caption)
+                                        .foregroundColor(.red)
+                                } else if let days = cert.daysUntilExpiration, days <= 30 {
+                                    Text("所选证书将在 \(days) 天后过期，请注意更新")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                } else {
+                                    Text("从钥匙串中选择Apple开发者证书")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
                             } else {
                                 Text("从钥匙串中选择Apple开发者证书")
                                     .font(.caption)
