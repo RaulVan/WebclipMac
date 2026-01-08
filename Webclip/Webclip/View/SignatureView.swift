@@ -234,6 +234,10 @@ struct SignatureView: View {
             .frame(minWidth: 600)
             .onAppear {
                 checkLastGeneratedFile()
+                // 加载上次使用的证书
+                if selectedSystemCertificate == nil {
+                    selectedSystemCertificate = certificateManager.getLastUsedCertificate()
+                }
             }
         }
     }
@@ -301,6 +305,8 @@ struct SignatureView: View {
                         if let saveURL = savePanel.url {
                             do {
                                 try signedData.write(to: saveURL)
+                                // 保存上次使用的证书
+                                certificateManager.saveLastUsedCertificate(certificate)
                                 isSigning = false
                                 status = "签名成功！文件已保存为: \(saveURL.lastPathComponent)"
                                 isStatusError = false

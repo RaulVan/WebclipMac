@@ -102,6 +102,9 @@ struct CertificateInfo: Identifiable, Hashable {
 class CertificateManager: ObservableObject {
     @Published var availableCertificates: [CertificateInfo] = []
     
+    // UserDefaults key，用于保存上次使用的证书名称
+    private static let lastUsedCertificateKey = "lastUsedCertificateName"
+    
     init() {
         loadSystemCertificates()
     }
@@ -109,6 +112,37 @@ class CertificateManager: ObservableObject {
     // 加载系统钥匙串中的代码签名证书
     func loadSystemCertificates() {
         availableCertificates = getSystemDeveloperCertificates()
+    }
+    
+    // MARK: - 证书记忆功能
+    
+    // 保存上次使用的证书名称
+    func saveLastUsedCertificate(_ certificate: CertificateInfo) {
+        UserDefaults.standard.set(certificate.name, forKey: Self.lastUsedCertificateKey)
+        print("已保存上次使用的证书: \(certificate.name)")
+    }
+    
+    // 获取上次使用的证书（如果仍然存在）
+    func getLastUsedCertificate() -> CertificateInfo? {
+        guard let savedName = UserDefaults.standard.string(forKey: Self.lastUsedCertificateKey) else {
+            print("没有保存的上次使用证书记录")
+            return nil
+        }
+        
+        // 在当前可用证书列表中查找
+        if let certificate = availableCertificates.first(where: { $0.name == savedName }) {
+            print("找到上次使用的证书: \(savedName)")
+            return certificate
+        }
+        
+        print("上次使用的证书已不存在: \(savedName)")
+        return nil
+    }
+    
+    // 清除上次使用的证书记录
+    func clearLastUsedCertificate() {
+        UserDefaults.standard.removeObject(forKey: Self.lastUsedCertificateKey)
+        print("已清除上次使用的证书记录")
     }
     
     // 获取系统中的Apple开发者证书

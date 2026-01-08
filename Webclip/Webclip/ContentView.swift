@@ -459,6 +459,12 @@ struct ContentView: View {
             .padding()
             .frame(minWidth: 600)
         }
+        .onAppear {
+            // 加载上次使用的证书
+            if selectedSystemCertificate == nil {
+                selectedSystemCertificate = certificateManager.getLastUsedCertificate()
+            }
+        }
     }
     
     // 输入验证功能
@@ -809,6 +815,8 @@ struct ContentView: View {
                 let signedData = try certificateManager.signWithSystemCertificate(configData, using: certificate)
                 
                 DispatchQueue.main.async {
+                    // 保存上次使用的证书
+                    certificateManager.saveLastUsedCertificate(certificate)
                     saveConfig(configData: signedData, isSigned: true)
                 }
             } catch {
